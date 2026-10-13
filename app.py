@@ -59,6 +59,8 @@ h2, h3 {font-weight: 700 !important;}
 .userbox {display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
     border-radius: 16px; padding: 10px 14px; margin: 10px 0 16px; color: #fff; font-size: .92rem;}
 .userbox .muted {color: #CDB0C6;}
+.notice {background: linear-gradient(90deg, rgba(255,107,157,.28), rgba(232,51,109,.22)); border: 1px solid rgba(255,255,255,.2);
+    color: #fff; border-radius: 14px; padding: 9px 14px; margin: -6px 0 8px; font-size: .9rem;}
 .avatar {width: 40px; height: 40px; min-width: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
     font-weight: 800; color: #fff; background: linear-gradient(135deg, #FF6B9D, #C2255C); box-shadow: 0 3px 10px rgba(0,0,0,.25);}
 .avatar.big {width: 84px; height: 84px; min-width: 84px; font-size: 2.2rem;}
@@ -390,35 +392,84 @@ def page_history(uid):
 
 def page_friends(uid):
     header("👥 Bạn bè", "Quản lý mạng bạn bè của bạn")
+
+    # --- lời mời kết bạn gửi đến: Chấp nhận / Từ chối ---
+    incoming = friend_service.incoming_requests(uid)
+    if incoming:
+        st.subheader(f"📨 Lời mời kết bạn ({len(incoming)})")
+        for r in incoming:
+            with st.container(border=True):
+                c0, c1, c2, c3 = st.columns([0.8, 4, 1.4, 1.2], vertical_alignment="center")
+                c0.markdown(f'<div class="avatar">{(r["name"] or "?")[:1].upper()}</div>', unsafe_allow_html=True)
+                c1.markdown(f"**{r['name']}** · ID {r['userId']} · {r['city']}  \n"
+                            f"<span class='muted'>🤝 {r['banChung']} bạn chung · 🎬 {r['phimChung']} phim cùng đánh giá"
+                            f" · gửi lúc {str(r['sentAt'])[:10]}</span>", unsafe_allow_html=True)
+                if c2.button("✅ Chấp nhận", key=f"ra_{r['userId']}", type="primary", use_container_width=True):
+                    friend_service.accept_request(uid, r["userId"])
+                    st.toast(f"Bạn và {r['name']} đã trở thành bạn bè.", icon="🎉")
+                    st.rerun()
+                if c3.button("Từ chối", key=f"rd_{r['userId']}", use_container_width=True):
+                    friend_service.decline_request(uid, r["userId"])
+                    st.rerun()
+
+    # --- danh sách bạn bè ---
     friends = friend_service.list_friends(uid)
     st.subheader(f"Danh sách bạn bè ({len(friends)})")
     for f in friends:
         with st.container(border=True):
             c1, c2, c3 = st.columns([4, 1, 1])
-            c1.markdown(f"**{f['name']}**  \nUser ID: {f['userId']} · {f['city']}")
+            hop = (f"🎯 Hợp gu {int(f['hopGu'])}% ({f['phimChung']} phim chung)" if f.get("hopGu") is not None
+                   else "🎯 Chưa có phim chung")
+            c1.markdown(f"**{f['name']}**  \nUser ID: {f['userId']} · {f['city']}  \n"
+                        f"<span class='muted'>{hop} · kết bạn từ {f['ketBanTu']}</span>", unsafe_allow_html=True)
             c2.button("Xem hồ sơ", key=f"fp_{f['userId']}", on_click=go_profile, args=(f["userId"],))
             if c3.button("❌ Xóa", key=f"fd_{f['userId']}"):
                 friend_service.remove_friend(uid, f["userId"])
                 st.rerun()
+
+    # --- lời mời mình đã gửi ---
+    outgoing = friend_service.outgoing_requests(uid)
+    if outgoing:
+        st.subheader(f"⏳ Lời mời đã gửi ({len(outgoing)})")
+        for r in outgoing:
+            c1, c2 = st.columns([5, 1.4], vertical_alignment="center")
+            c1.markdown(f"**{r['name']}** (ID {r['userId']}) · {r['city']}  \n"
+                        f"<span class='muted'>Đang chờ phản hồi · gửi lúc {str(r['sentAt'])[:10]}</span>", unsafe_allow_html=True)
+            if c2.button("Hủy lời mời", key=f"rc_{r['userId']}", use_container_width=True):
+                friend_service.cancel_request(uid, r["userId"])
+                st.rerun()
+
+    # --- gợi ý kết bạn ---
     st.subheader("✨ Có thể bạn quen")
     for u in friend_service.suggest_friends(uid):
-        c1, c2 = st.columns([5, 1], vertical_alignment="center")
+        c1, c2 = st.columns([5, 1.4], vertical_alignment="center")
         c1.markdown(f"**{u['name']}** (ID {u['userId']}) · {u['city']}  \n"
                     f"<span class='muted'>🤝 {u['banChung']} bạn chung · 🎬 {u['phimChung']} phim cùng đánh giá"
                     f"{' · 📍 cùng thành phố' if u['cungThanhPho'] else ''}</span>", unsafe_allow_html=True)
-        if c2.button("➕ Thêm", key=f"fs_{u['userId']}"):
-            friend_service.add_friend(uid, u["userId"])
+        if c2.button("➕ Kết bạn", key=f"fs_{u['userId']}", use_container_width=True):
+            friend_service.send_request(uid, u["userId"])
+            st.toast(f"Đã gửi lời mời đến {u['name']}.", icon="📨")
             st.rerun()
+
+    # --- tìm và gửi lời mời ---
     st.subheader("Thêm bạn")
     kw = st.text_input("Tìm theo tên hoặc User ID")
     if kw.strip():
         for u in friend_service.search_users(kw, uid):
-            c1, c2 = st.columns([5, 1])
-            c1.write(f"{u['name']} (ID {u['userId']}) · {u['city']}")
+            c1, c2 = st.columns([5, 1.4], vertical_alignment="center")
+            c1.markdown(f"{u['name']} (ID {u['userId']}) · {u['city']} "
+                        f"<span class='muted'>· 🤝 {u['banChung']} bạn chung</span>", unsafe_allow_html=True)
             if u["isFriend"]:
                 c2.write("✔ Đã là bạn")
-            elif c2.button("➕ Thêm", key=f"fa_{u['userId']}"):
-                friend_service.add_friend(uid, u["userId"])
+            elif u["daGuiLoiMoi"]:
+                c2.write("⏳ Đã gửi lời mời")
+            elif u["coLoiMoiDen"]:
+                if c2.button(" Chấp nhận", key=f"sa_{u['userId']}", type="primary", use_container_width=True):
+                    friend_service.accept_request(uid, u["userId"])
+                    st.rerun()
+            elif c2.button("➕ Kết bạn", key=f"fa_{u['userId']}", use_container_width=True):
+                friend_service.send_request(uid, u["userId"])
+                st.toast(f"Đã gửi lời mời đến {u['name']}.", icon="📨")
                 st.rerun()
 
 
@@ -490,6 +541,11 @@ def main():
         st.markdown('<div class="brand"><span class="brand-ico">🎬</span><span>Hệ thống<br>gợi ý phim</span></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="userbox"><div class="avatar">{(st.session_state["user"]["name"] or "?")[:1].upper()}</div>'
                     f'<div><b>{st.session_state["user"]["name"]}</b><br><span class="muted">User ID: {uid}</span></div></div>', unsafe_allow_html=True)
+        pending = friend_service.count_requests(uid)
+        if pending:
+            st.markdown(f'<div class="notice">Bạn có <b>{pending}</b> lời mời kết bạn</div>', unsafe_allow_html=True)
+            st.button("Xem lời mời", key="to_requests", on_click=lambda: st.session_state.update(page=M_FRIEND),
+                      use_container_width=True)
         st.radio("Menu", MENU_VISIBLE, key="nav", index=None, label_visibility="collapsed", on_change=on_nav)
         st.caption("Redis: " + ("🟢 hoạt động" if rc.is_available() else "🔴 tắt"))
     pages = {M_HOME: page_home, M_LIST: page_list, M_SEARCH: page_search, M_DETAIL: page_detail,
